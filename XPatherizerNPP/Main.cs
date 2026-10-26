@@ -592,13 +592,21 @@ namespace XPatherizerNPP
         /// <returns>The document without default namespaces.</returns>
         public static XmlDocument RemoveDefaultNamespaces(XmlDocument XMLdoc)
         {
-            XmlNodeList Nodes = XMLdoc.SelectNodes("//namespace::*[name()='']");
-            string xml = XMLdoc.OuterXml;
+            bool removed;
+            return RemoveDefaultNamespaces(XMLdoc, out removed);
+        }
 
+        public static XmlDocument RemoveDefaultNamespaces(XmlDocument XMLdoc, out bool removed)
+        {
+            XmlNodeList Nodes = XMLdoc.SelectNodes("//namespace::*[name()='']");
+            removed = Nodes.Count != 0;
+            if (!removed) return XMLdoc;
+            string xml = XMLdoc.OuterXml;
+            HashSet<string> namespaces = new HashSet<string>();
             foreach (XmlNode nod in Nodes)
             {
                 string s = "xmlns=\"" + nod.InnerText + "\"";
-                xml = xml.Replace(s, "");
+                if (namespaces.Add(s)) xml = xml.Replace(s, "");
             }
 
             XMLdoc.LoadXml(xml);
@@ -725,12 +733,39 @@ namespace XPatherizerNPP
             return toret;
         }
 
+        // Build labels from node metadata without serializing a whole subtree.
+        internal static string NodetoText(XmlNode node)
+        {
+            if (node.NodeType == XmlNodeType.Attribute) return "@" + node.Name + ": " + node.Value;
+            if (node.NodeType == XmlNodeType.Element)
+            {
+                string label = node.Name;
+                for (int i = 0; i < settings.NodeTypes.Count; i++)
+                {
+                    string type = settings.NodeTypes[i].ToString();
+                    if (!node.Name.StartsWith(type) && type != "") continue;
+                    XmlAttribute attribute = node.Attributes[settings.AttributeNames[i].ToString()];
+                    if (attribute != null)
+                        label += " (" + settings.TextToShow[i] + attribute.Value + ")";
+                }
+                return label;
+            }
+            switch (node.NodeType)
+            {
+                case XmlNodeType.CDATA: return "CDATA: " + node.Value.Replace("&amp;", "&");
+                case XmlNodeType.Comment: return "Comment: " + node.Value.Replace("&amp;", "&");
+                case XmlNodeType.XmlDeclaration: return "XML Declaration";
+                case XmlNodeType.DocumentType: return "DOCTYPE";
+                default: return NodetoText(node.OuterXml);
+            }
+        }
+
         /// <summary>
         /// Returns an XPath string that points directly to the node.
         /// </summary>
         /// <param name="node">The node to create an XPath string for.</param>
         /// <returns>The XPath string for the node.</returns>
-        internal static string FindXPath(XmlNode node, bool DefaultRemoved)
+        internal static string FindXPath(XmlNode node, bool DefaultRemoved, Dictionary<XmlNode, int> siblingIndices = null)
         {
             StringBuilder builder = new StringBuilder();
             while (node != null)
@@ -738,7 +773,7 @@ namespace XPatherizerNPP
                 int index = 1;
                 try
                 {
-                    index = FindElementIndex(node);
+                    index = siblingIndices == null ? FindElementIndex(node) : FindElementIndexCached(node, siblingIndices);
                 }
                 catch { }
                 switch (node.NodeType)
@@ -835,6 +870,26 @@ namespace XPatherizerNPP
                 }
             }
             return 1;
+        }
+
+        static int FindElementIndexCached(XmlNode node, Dictionary<XmlNode, int> indices)
+        {
+            if (node.ParentNode == null || node.ParentNode is XmlDocument) return 1;
+            // A result can be expanded while another query is still being built.
+            lock (indices)
+            {
+                int index;
+                if (indices.TryGetValue(node, out index)) return index;
+                Dictionary<string, int> counts = new Dictionary<string, int>();
+                foreach (XmlNode sibling in node.ParentNode.ChildNodes)
+                {
+                    string key = ((int)sibling.NodeType).ToString() + ":" + sibling.Name;
+                    counts.TryGetValue(key, out index);
+                    counts[key] = ++index;
+                    indices[sibling] = index;
+                }
+                return indices[node];
+            }
         }
 
         /// <summary>

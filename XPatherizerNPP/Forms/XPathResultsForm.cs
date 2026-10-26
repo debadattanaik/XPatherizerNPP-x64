@@ -20,10 +20,12 @@ namespace XPatherizerNPP
         public TreeNode LastSelectedNode;
         public bool VerifyResults;
         private bool bitRestart;
+        private string[] pendingQueries;
 
         public XPathResultsForm()
         {
             InitializeComponent();
+            resultsTree.BeforeExpand += resultsTree_BeforeExpand;
             HasBeenShown = false;
             SelectedNodes = new ArrayList();
             VerifyResults = false;
@@ -42,7 +44,66 @@ namespace XPatherizerNPP
 
         private void btnShowAll_Click(object sender, EventArgs e)
         {
-            resultsTree.ExpandAll();
+            resultsTree.BeginUpdate();
+            try
+            {
+                Stack<TreeNode> pending = new Stack<TreeNode>();
+                foreach (TreeNode root in resultsTree.Nodes) pending.Push(root);
+                while (pending.Count > 0)
+                {
+                    TreeNode node = pending.Pop();
+                    LazyResultNode lazy = node as LazyResultNode;
+                    if (lazy != null) lazy.LoadChildren();
+                    foreach (TreeNode child in node.Nodes) pending.Push(child);
+                }
+                resultsTree.ExpandAll();
+            }
+            finally { resultsTree.EndUpdate(); }
+        }
+
+        private void resultsTree_BeforeExpand(object sender, TreeViewCancelEventArgs e)
+        {
+            LazyResultNode node = e.Node as LazyResultNode;
+            if (node == null) return;
+            resultsTree.BeginUpdate();
+            try { node.LoadChildren(); }
+            finally { resultsTree.EndUpdate(); }
+        }
+
+        // Keep Tag as the XPath string: navigation, export, and removal use it.
+        internal sealed class LazyResultNode : TreeNode
+        {
+            readonly XmlNode source;
+            readonly bool defaultRemoved;
+            readonly Dictionary<XmlNode, int> siblingIndices;
+            bool loaded;
+
+            internal LazyResultNode(XmlNode source, bool defaultRemoved, Dictionary<XmlNode, int> siblingIndices)
+                : base(Main.NodetoText(source))
+            {
+                this.source = source;
+                this.defaultRemoved = defaultRemoved;
+                this.siblingIndices = siblingIndices;
+                Tag = Main.FindXPath(source, defaultRemoved, siblingIndices);
+                if (source.NodeType != XmlNodeType.Attribute &&
+                    (source.HasChildNodes || (source.Attributes != null && source.Attributes.Count > 0)))
+                    Nodes.Add(new TreeNode("Loading..."));
+            }
+
+            internal void LoadChildren()
+            {
+                if (loaded) return;
+                List<TreeNode> children = new List<TreeNode>();
+                if (source.Attributes != null)
+                    foreach (XmlNode attribute in source.Attributes)
+                        children.Add(new LazyResultNode(attribute, defaultRemoved, siblingIndices));
+                if (source.NodeType != XmlNodeType.Attribute)
+                    foreach (XmlNode child in source.ChildNodes)
+                        children.Add(new LazyResultNode(child, defaultRemoved, siblingIndices));
+                Nodes.Clear();
+                Nodes.AddRange(children.ToArray());
+                loaded = true;
+            }
         }
 
         private void btnHideAll_Click(object sender, EventArgs e)
@@ -156,12 +217,15 @@ namespace XPatherizerNPP
         {
             if (worker.IsBusy)
             {
+                pendingQueries = (string[])xpathStrings.Clone();
                 worker.CancelAsync();
                 bitRestart = true;
             }
             else
             {
                 resultsTree.Nodes.Clear();
+                SelectedNodes.Clear();
+                LastSelectedNode = null;
                 VerifyResults = false;
                 ShowStopButton();
                 worker.RunWorkerAsync(xpathStrings);
@@ -170,18 +234,23 @@ namespace XPatherizerNPP
 
         private void worker_ProgressChanged(object sender, ProgressChangedEventArgs e)
         {
-            ProgressReporter progress = e.UserState as ProgressReporter;
-            resultsTree.Invoke(new workerProgress(ReportProgress), new object[] { progress });
+            // BackgroundWorker already dispatches ProgressChanged on the UI thread.
+            resultsTree.BeginUpdate();
+            try { ReportProgress((ProgressReporter)e.UserState); }
+            finally { resultsTree.EndUpdate(); }
         }
 
         private void worker_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
         {
-            resultsTree.Nodes.RemoveAt(0);
+            if (resultsTree.Nodes.Count > 0 && resultsTree.Nodes[0].Text == "Processing...")
+                resultsTree.Nodes.RemoveAt(0);
+            if (e.Error != null) resultsTree.Nodes.Add("Search failed: " + e.Error.Message);
             HideStopButton();
             if (bitRestart)
             {
                 bitRestart = false;
-                Main.BeginSearch();
+                BeginSearch(pendingQueries);
+                pendingQueries = null;
             }
         }
 
@@ -230,10 +299,7 @@ namespace XPatherizerNPP
 
                 if (Main.settings.defaultNamespace == "")
                 {
-                    int Before = XMLdoc.OuterXml.Length;
-                    XMLdoc = Main.RemoveDefaultNamespaces(XMLdoc);
-                    if (XMLdoc.OuterXml.Length != Before)
-                        bitDefaultRemoved = true;
+                    XMLdoc = Main.RemoveDefaultNamespaces(XMLdoc, out bitDefaultRemoved);
                 }
 
                 XPathNavigator navigator = XMLdoc.CreateNavigator();
@@ -246,6 +312,7 @@ namespace XPatherizerNPP
                 System.Xml.XPath.XPathResultType xprt = System.Xml.XPath.XPathResultType.Any;
 
                 int i = 1;
+                Dictionary<XmlNode, int> siblingIndices = new Dictionary<XmlNode, int>();
 
                 foreach (string s in xpathStrings)
                 {
@@ -256,7 +323,7 @@ namespace XPatherizerNPP
                     while (xPath.Contains("(:") && xPath.Contains(":)"))
                     {
                         int intStart = xPath.IndexOf("(:");
-                        int intEnd = xPath.IndexOf(":)", i);
+                        int intEnd = xPath.IndexOf(":)", intStart + 2);
 
                         if (intEnd <= intStart)
                             intEnd = xPath.Length - 2;
@@ -269,7 +336,7 @@ namespace XPatherizerNPP
                         {
                             xpe = XPathExpression.Compile(xPath, xnm);
                             result = navigator.Evaluate(xpe);
-                            xprt = xpe.ReturnType;
+                            xprt = result is XPathNodeIterator ? XPathResultType.NodeSet : xpe.ReturnType;
                             strres = result.ToString();
                         }
                         catch (System.Xml.XPath.XPathException xpx)
@@ -281,42 +348,21 @@ namespace XPatherizerNPP
                         }
                         if (xprt == System.Xml.XPath.XPathResultType.NodeSet)
                         {
-                            XPathNodeIterator xpni = navigator.Select(xPath, xnm);
-                            string ss = "s";
-                            try
-                            {
-                                if (xpni.Count == 1) ss = "";
-                            }
-                            catch (Exception ex)
-                            {
-                                worker.ReportProgress(0, new ProgressReporter(i + ": ERROR"));
-                                worker.ReportProgress(0, new ProgressReporter(ex.Message, i + ": ERROR"));
-                                i++;
-                                continue;
-                            }
-                            TreeNode tNode = new TreeNode(i + ": " + xpni.Count + " Hit" + ss);
-                            tNode.Tag = "X:" + xPath;
-                            worker.ReportProgress(0, new ProgressReporter(tNode));
+                            XPathNodeIterator xpni = (XPathNodeIterator)result;
+                            List<TreeNode> matches = new List<TreeNode>();
                             while (xpni.MoveNext())
                             {
                                 if (worker.CancellationPending) return;
                                 if (xpni.Current is IHasXmlNode)
                                 {
                                     XmlNode Node = ((IHasXmlNode)xpni.Current).GetNode();
-                                    string pos = Main.FindXPath(Node, bitDefaultRemoved);
-                                    string NodeText = Main.NodetoText(xpni.Current.OuterXml);
-                                    if (NodeText.StartsWith("Text") || NodeText.StartsWith("CDATA"))
-                                        tNode = new TreeNode(NodeText);
-                                    else
-                                    {
-                                        TreeNode[] childNodes = GetChildren(Node, bitDefaultRemoved);
-                                        if (childNodes != null)
-                                            tNode = new TreeNode(NodeText, childNodes);
-                                    }
-                                    tNode.Tag = pos;
-                                    worker.ReportProgress(0, new ProgressReporter(tNode, i + ": " + xpni.Count + " Hit" + ss));
+                                    matches.Add(new LazyResultNode(Node, bitDefaultRemoved, siblingIndices));
                                 }
                             }
+                            TreeNode group = new TreeNode(i + ": " + matches.Count + " Hit" + (matches.Count == 1 ? "" : "s"), matches.ToArray());
+                            group.Tag = "X:" + xPath;
+                            // Publish once per query, with descendants deferred until expanded.
+                            worker.ReportProgress(0, new ProgressReporter(group));
                         }
                         else
                         {
@@ -339,42 +385,22 @@ namespace XPatherizerNPP
         /// <returns>A collection of child nodes.</returns>
         internal TreeNode[] GetChildren(XmlNode Node, bool bitDefaultRemoved)
         {
-            TreeNode[] treeNodes;
-            int j = 0;
+            List<TreeNode> treeNodes = new List<TreeNode>();
+            Dictionary<XmlNode, int> indices = new Dictionary<XmlNode, int>();
             if (Node.Attributes != null)
             {
-                treeNodes = new TreeNode[Node.ChildNodes.Count + Node.Attributes.Count];
                 foreach (XmlNode att in Node.Attributes)
                 {
-                    TreeNode tNode = new TreeNode("@" + att.Name + ": " + att.Value);
-                    tNode.Tag = Main.FindXPath(att, bitDefaultRemoved);
-                    treeNodes[j] = tNode;
-                    j++;
-                    if (worker.CancellationPending) return new TreeNode[] { new TreeNode("Search has been Canceled.") };
+                    if (worker.CancellationPending) break;
+                    treeNodes.Add(new LazyResultNode(att, bitDefaultRemoved, indices));
                 }
             }
-            else
-                treeNodes = new TreeNode[Node.ChildNodes.Count];
             foreach (XmlNode cNode in Node.ChildNodes)
             {
-                TreeNode tNode = null;
-                if (Main.NodetoText(cNode.OuterXml).StartsWith("Text") || Main.NodetoText(cNode.OuterXml).StartsWith("CDATA"))
-                    tNode = new TreeNode(Main.NodetoText(cNode.OuterXml));
-                else
-                {
-                    TreeNode[] childNodes = GetChildren(cNode, bitDefaultRemoved);
-                    if (childNodes != null)
-                        tNode = new TreeNode(Main.NodetoText(cNode.OuterXml), childNodes);
-                }
-                if (tNode != null)
-                {
-                    tNode.Tag = Main.FindXPath(cNode, bitDefaultRemoved);
-                    treeNodes[j] = tNode;
-                }
-                j++;
-                if (worker.CancellationPending) return new TreeNode[] { new TreeNode("Search has been Canceled.") };
+                if (worker.CancellationPending) break;
+                treeNodes.Add(new LazyResultNode(cNode, bitDefaultRemoved, indices));
             }
-            return treeNodes;
+            return treeNodes.ToArray();
         }
 
         private void resultsTree_MouseUp(object sender, MouseEventArgs e)

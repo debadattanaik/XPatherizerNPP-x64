@@ -1,4 +1,4 @@
-XPatherizerNPP 2.10.1.0 for 64-bit Notepad++
+XPatherizerNPP 2.10.2.0 for 64-bit Notepad++
 
 Manual installation
 ===================
@@ -19,7 +19,7 @@ Validation performed
 ====================
 
 - PE machine: AMD64 (0x8664)
-- File version: 2.10.1.0
+- File version: 2.10.2.0
 - Required exports: beNotified, getFuncsArray, getName, isUnicode,
   messageProc, setInfo
 - Loaded successfully in isolated Notepad++ 8.9.8.1 x64 portable instance
@@ -30,6 +30,9 @@ Validation performed
 - Verified docked panels, exactly two results for /catalog/book in the sample
   XML, opening another tab, and restoration of per-tab XPath query text.
 - Per-tab XPath state is enabled again.
+- Results load descendants on expansion. Show All materializes the full tree.
+- Auto Search waits for a 350 ms typing pause. Duplicate query evaluation and
+  needless document serialization/reparsing are removed; sibling indices are cached.
 
 Build and functional test
 =========================

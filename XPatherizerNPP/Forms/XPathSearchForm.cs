@@ -12,10 +12,14 @@ namespace XPatherizerNPP
     public partial class XPathSearchForm : Form
     {
         public bool HasBeenShown;
+        readonly Timer autoSearchTimer = new Timer();
 
         public XPathSearchForm()
         {
             InitializeComponent();
+            autoSearchTimer.Interval = 350;
+            autoSearchTimer.Tick += delegate { autoSearchTimer.Stop(); if (Main.settings.AutoSearch) BeginSearch(); };
+            Disposed += delegate { autoSearchTimer.Dispose(); };
             HasBeenShown = false;
         }
 
@@ -46,14 +50,16 @@ namespace XPatherizerNPP
 
         private void txtXPath_TextChanged(object sender, EventArgs e)
         {
+            autoSearchTimer.Stop();
             if (Main.settings.AutoSearch)
             {
-                BeginSearch();
+                autoSearchTimer.Start();
             }
         }
 
         public void BeginSearch()
         {
+            autoSearchTimer.Stop();
             //Only search if the forms have been shown at least once.
             if (HasBeenShown && Main.frmXPathResults.HasBeenShown)
             {
