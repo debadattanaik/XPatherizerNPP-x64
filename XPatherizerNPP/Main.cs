@@ -255,7 +255,7 @@ namespace XPatherizerNPP
         /// </summary>
         internal static void XPathHelp()
         {
-            System.Diagnostics.Process.Start("https://github.com/debadattanaik/XPatherizerNPP-x64/blob/x64/docs/XPATH.md");
+            System.Diagnostics.Process.Start("https://www.w3schools.com/xml/xpath_intro.asp");
         }
 
         /// <summary>

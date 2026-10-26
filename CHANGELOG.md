@@ -2,6 +2,7 @@
 
 ## 2.10.2.0
 
+- XPath Help (W3 Schools) opens https://www.w3schools.com/xml/xpath_intro.asp.
 - Build result descendants only when expanded, preserving XPath strings for navigation, export, and removal. Show All explicitly builds the full tree.
 - Create element labels from XML metadata rather than repeatedly serializing descendant subtrees.
 - Cache sibling indices for navigation paths.

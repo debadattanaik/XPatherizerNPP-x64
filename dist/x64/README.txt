@@ -44,5 +44,6 @@ adds an in-process smoke test and logs to %TEMP%\XPatherizerNPP-smoketest.log.
 The distributed production DLL does not include the smoke test.
 Unexpected callback exceptions are logged to %TEMP%\XPatherizerNPP-errors.log.
 
-Project, source, help, and download references use this branch:
+Project, source, and download references use this branch:
 https://github.com/debadattanaik/XPatherizerNPP-x64/tree/x64
+XPath Help (W3 Schools) opens https://www.w3schools.com/xml/xpath_intro.asp

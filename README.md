@@ -36,4 +36,4 @@ The source build was tested in Notepad++ **8.9.8.1 x64**: startup, docked panels
 - [Changes](https://github.com/debadattanaik/XPatherizerNPP-x64/blob/x64/CHANGELOG.md)
 - [Attribution and license information](https://github.com/debadattanaik/XPatherizerNPP-x64/blob/x64/NOTICE.md)
 
-All project, help, and download links in this version target this repository's `x64` branch. Original authorship notices remain preserved.
+Project and download links target this repository's `x64` branch. The XPath Help (W3 Schools) menu opens the W3Schools XPath introduction. Original authorship notices remain preserved.
