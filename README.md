@@ -2,6 +2,8 @@
 
 XPath query analyzer for **64-bit Notepad++**, maintained on the [x64 branch](https://github.com/debadattanaik/XPatherizerNPP-x64/tree/x64).
 
+This project uses source code from the original [XPatherizerNPP project](https://code.google.com/p/xpatherizernpp/) by BGuenthner. See [attribution and license information](NOTICE.md).
+
 Version **2.10.2.0** adds faster XPath result construction and expandable results to the source-built x64 startup fixes. The plugin uses .NET Framework 4.8.
 
 ## Install
